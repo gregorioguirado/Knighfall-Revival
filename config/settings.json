@@ -1,0 +1,7 @@
+{
+  "alert_threshold": 30,
+  "milestones": [30, 50, 100],
+  "goal": 100,
+  "app_id": 1911390,
+  "peak_ever": 1512
+}

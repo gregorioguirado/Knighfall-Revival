@@ -30,17 +30,29 @@ This lets GitHub send emails on your behalf without exposing your real password.
 
 > If you don't see "App passwords", make sure 2-Step Verification is turned on first.
 
-### Step 2 — Add Secrets to GitHub (~3 min)
+### Step 2 — Add Secrets to GitHub (~2 min)
 Go to: **https://github.com/gregorioguirado/Knighfall-Revival/settings/secrets/actions**
 
-Click **"New repository secret"** and add these four secrets one by one:
+Click **"New repository secret"** and add these **two** secrets (credentials only):
 
 | Secret name | Value |
 |-------------|-------|
 | `GMAIL_USER` | Your Gmail address (e.g. `you@gmail.com`) |
 | `GMAIL_APP_PASSWORD` | The 16-char App Password from Step 1 |
-| `ALERT_EMAIL` | Where to send alerts (can be same as above) |
-| `ALERT_THRESHOLD` | `30` (alert when count first exceeds 30) |
+
+> Everything else (threshold, milestones, goal) lives in `config/settings.json` — edit it directly in the repo, no secrets page needed.
+
+### Step 2b — Add alert subscribers (~1 min)
+Edit **`config/subscribers.csv`** in the repo and add one row per person who should receive alerts:
+
+```
+email,name,active
+you@gmail.com,Greg,yes
+friend@example.com,Friend,yes
+```
+
+- Set `active` to `no` to pause someone without removing them
+- Anyone can be added with a direct edit on GitHub — no code required
 
 ### Step 3 — Test it manually (~1 min)
 Go to: **https://github.com/gregorioguirado/Knighfall-Revival/actions**

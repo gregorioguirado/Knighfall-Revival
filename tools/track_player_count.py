@@ -1,26 +1,28 @@
 """
 Tool: track_player_count.py
 Purpose: Fetch and log Knightfall's Steam concurrent player count.
-         Sends a Gmail alert when count exceeds ALERT_THRESHOLD.
+         Sends Gmail alerts to everyone in config/subscribers.csv at milestones.
          Designed to run in GitHub Actions (daily cron) or locally.
 
 Usage:
   python tools/track_player_count.py           # log current count + alert if needed
   python tools/track_player_count.py --summary # show trend report
 
-Environment variables (set as GitHub Secrets or in .env):
+GitHub Secrets required (credentials only):
   GMAIL_USER          sender Gmail address
   GMAIL_APP_PASSWORD  Gmail App Password (not your account password)
-  ALERT_EMAIL         recipient address (can be same as GMAIL_USER)
-  ALERT_THRESHOLD     integer, default 30 — alert when count exceeds this
+
+All other config lives in config/settings.json and config/subscribers.csv.
 """
 
 import requests
 import csv
+import json
 import os
 import sys
 import smtplib
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 
 # Load .env if running locally
@@ -30,23 +32,57 @@ try:
 except ImportError:
     pass
 
-APP_ID = 1911390
-PEAK_EVER = 1512  # Historical peak, June 2024
-GOAL = 100
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
 
-# Log file lives in data/ so it gets committed to the repo and is visible on GitHub
-LOG_FILE = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "data", "player_count_log.csv")
-)
+ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+LOG_FILE        = os.path.join(ROOT, "data",   "player_count_log.csv")
+SETTINGS_FILE   = os.path.join(ROOT, "config", "settings.json")
+SUBSCRIBERS_FILE = os.path.join(ROOT, "config", "subscribers.csv")
+TEMPLATE_FILE   = os.path.join(ROOT, "tools",  "email_alert_template.html")
 
-GMAIL_USER = os.getenv("GMAIL_USER", "")
+LOG_URL     = "https://github.com/gregorioguirado/Knighfall-Revival/blob/main/data/player_count_log.csv"
+DISCORD_URL = "https://discord.gg/Jt58UeZf"
+
+# ---------------------------------------------------------------------------
+# Config (from config/settings.json)
+# ---------------------------------------------------------------------------
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE) as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"WARNING: Could not read settings.json ({e}), using defaults.")
+        return {}
+
+_settings = load_settings()
+
+APP_ID          = _settings.get("app_id", 1911390)
+PEAK_EVER       = _settings.get("peak_ever", 1512)
+GOAL            = _settings.get("goal", 100)
+ALERT_THRESHOLD = _settings.get("alert_threshold", 30)
+MILESTONES      = _settings.get("milestones", [30, 50, 100])
+
+# Credentials stay as environment variables / GitHub Secrets
+GMAIL_USER         = os.getenv("GMAIL_USER", "")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
-ALERT_EMAIL = os.getenv("ALERT_EMAIL", GMAIL_USER)
-ALERT_THRESHOLD = int(os.getenv("ALERT_THRESHOLD", "30"))
 
-# Milestone thresholds — alert fires once per milestone (tracked in log)
-MILESTONES = [30, 50, 100]
+# ---------------------------------------------------------------------------
+# Subscriber list (from config/subscribers.csv)
+# ---------------------------------------------------------------------------
 
+def load_subscribers():
+    """Return list of dicts for active subscribers."""
+    if not os.path.exists(SUBSCRIBERS_FILE):
+        print("WARNING: config/subscribers.csv not found — no alert emails will be sent.")
+        return []
+    with open(SUBSCRIBERS_FILE, newline="") as f:
+        rows = list(csv.DictReader(f))
+    active = [r for r in rows if r.get("active", "yes").strip().lower() == "yes"
+              and r.get("email", "").strip()]
+    return active
 
 # ---------------------------------------------------------------------------
 # Steam API
@@ -64,7 +100,6 @@ def fetch_player_count():
     except Exception as e:
         print(f"ERROR fetching player count: {e}")
         return None
-
 
 # ---------------------------------------------------------------------------
 # CSV log
@@ -93,53 +128,88 @@ def append_log(count, note=""):
 
 def highest_milestone_reached(rows):
     """Return the highest milestone already logged so we don't re-alert."""
-    milestone_notes = [r["note"] for r in rows if r["note"].startswith("MILESTONE")]
-    if not milestone_notes:
-        return 0
-    reached = [int(n.split(":")[1].strip()) for n in milestone_notes if ":" in n]
+    notes = [r["note"] for r in rows if r["note"].startswith("MILESTONE")]
+    reached = [int(n.split(":")[1].strip()) for n in notes if ":" in n]
     return max(reached) if reached else 0
 
-
 # ---------------------------------------------------------------------------
-# Gmail alert
+# Email alert
 # ---------------------------------------------------------------------------
 
-def send_gmail_alert(count, milestone=None):
+def _render_template(count, milestone, trend_label, trend_color):
+    progress = min(100, round(count / GOAL * 100))
+    date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
+    try:
+        with open(TEMPLATE_FILE, encoding="utf-8") as f:
+            html = f.read()
+    except FileNotFoundError:
+        return None
+    for token, value in {
+        "{{COUNT}}":       str(count),
+        "{{MILESTONE}}":   str(milestone or count),
+        "{{PROGRESS}}":    str(progress),
+        "{{TREND_LABEL}}": trend_label,
+        "{{TREND_COLOR}}": trend_color,
+        "{{LOG_URL}}":     LOG_URL,
+        "{{DISCORD_URL}}": DISCORD_URL,
+        "{{DATE}}":        date_str,
+    }.items():
+        html = html.replace(token, value)
+    return html
+
+
+def send_alerts(count, milestone=None, rows=None):
+    """Send alert email to all active subscribers."""
     if not GMAIL_USER or not GMAIL_APP_PASSWORD:
-        print("ALERT: No Gmail credentials set — skipping email.")
+        print("ALERT: No Gmail credentials set — skipping emails.")
+        return
+
+    subscribers = load_subscribers()
+    if not subscribers:
+        print("ALERT: No active subscribers — skipping emails.")
         return
 
     subject = f"Knightfall alert: {count} players online!"
     if milestone == GOAL:
         subject = f"GOAL REACHED — Knightfall hit {count} players!"
 
-    body = f"""Knightfall: A Daring Journey player count update
+    # Trend from last 3 data points
+    trend_label, trend_color = "FLAT", "#c9a227"
+    if rows:
+        recent = [int(r["player_count"]) for r in rows[-3:] if r["player_count"].isdigit()]
+        if len(recent) >= 2:
+            delta = recent[-1] - recent[0]
+            if delta > 5:
+                trend_label, trend_color = "UP", "#3fb950"
+            elif delta < -5:
+                trend_label, trend_color = "DOWN", "#f85149"
 
-Current players online: {count}
-Goal: {GOAL}
-Progress: {min(100, round(count / GOAL * 100))}%
-All-time peak: {PEAK_EVER}
-
-View full log:
-https://github.com/gregorioguirado/Knighfall-Revival/blob/main/data/player_count_log.csv
-
-Keep going — post a clip or check the Discord.
-https://discord.gg/Jt58UeZf
-"""
-
-    msg = MIMEText(body)
-    msg["Subject"] = subject
-    msg["From"] = GMAIL_USER
-    msg["To"] = ALERT_EMAIL
+    html_body = _render_template(count, milestone, trend_label, trend_color)
+    plain_body = (
+        f"Knightfall: A Daring Journey — {count} players online\n"
+        f"Goal: {GOAL} | Progress: {min(100, round(count / GOAL * 100))}%\n\n"
+        f"View log: {LOG_URL}\n"
+        f"Discord:  {DISCORD_URL}\n"
+    )
 
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-            server.send_message(msg)
-        print(f"Alert email sent to {ALERT_EMAIL}")
+            for sub in subscribers:
+                email = sub["email"].strip()
+                if html_body:
+                    msg = MIMEMultipart("alternative")
+                    msg.attach(MIMEText(plain_body, "plain"))
+                    msg.attach(MIMEText(html_body, "html"))
+                else:
+                    msg = MIMEText(plain_body)
+                msg["Subject"] = subject
+                msg["From"] = GMAIL_USER
+                msg["To"] = email
+                server.send_message(msg)
+                print(f"  Alert sent → {email} ({sub.get('name', '')})")
     except Exception as e:
-        print(f"ERROR sending alert email: {e}")
-
+        print(f"ERROR sending alert emails: {e}")
 
 # ---------------------------------------------------------------------------
 # Summary report
@@ -161,14 +231,13 @@ def print_summary():
     recent = []
     for r in rows:
         try:
-            ts = datetime.strptime(r["timestamp"], "%Y-%m-%d %H:%M UTC").replace(
-                tzinfo=timezone.utc
-            )
+            ts = datetime.strptime(r["timestamp"], "%Y-%m-%d %H:%M UTC").replace(tzinfo=timezone.utc)
             if ts >= cutoff and r["player_count"].isdigit():
                 recent.append(int(r["player_count"]))
         except ValueError:
             pass
 
+    subs = load_subscribers()
     print("=" * 42)
     print("  KNIGHTFALL PLAYER COUNT SUMMARY")
     print("=" * 42)
@@ -178,6 +247,8 @@ def print_summary():
     print(f"  All-time peak:    {PEAK_EVER}")
     print(f"  Goal:             {GOAL}")
     print(f"  Progress:         {min(100, round(latest / GOAL * 100))}%")
+    print(f"  Alert threshold:  {ALERT_THRESHOLD}")
+    print(f"  Subscribers:      {len(subs)} active")
     print("=" * 42)
 
     if len(recent) >= 3:
@@ -189,7 +260,6 @@ def print_summary():
         else:
             print("  TREND: FLAT — needs a push (post a clip)")
     print()
-
 
 # ---------------------------------------------------------------------------
 # Main
@@ -208,7 +278,6 @@ def main():
     rows = load_log()
     prev_milestone = highest_milestone_reached(rows)
 
-    # Determine if a new milestone was just crossed
     new_milestone = None
     for m in sorted(MILESTONES):
         if count >= m and m > prev_milestone:
@@ -229,12 +298,11 @@ def main():
     else:
         print("Still low — focus on Discord coordination (Phase 1).")
 
-    # Send alert on milestone or if count just crossed threshold
     if new_milestone:
         print(f"New milestone reached: {new_milestone} players!")
-        send_gmail_alert(count, milestone=new_milestone)
+        send_alerts(count, milestone=new_milestone, rows=rows)
     elif count >= ALERT_THRESHOLD and prev_milestone == 0:
-        send_gmail_alert(count)
+        send_alerts(count, rows=rows)
 
 
 if __name__ == "__main__":
