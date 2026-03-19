@@ -6,9 +6,14 @@ on:
     - cron: "0 20 * * *"
   workflow_dispatch:  # Allow manual trigger from GitHub Actions tab
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   track:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required to push the log commit back to the repo
 
     steps:
       - name: Checkout repo
