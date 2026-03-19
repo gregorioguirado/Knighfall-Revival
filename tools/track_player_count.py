@@ -40,7 +40,7 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 LOG_FILE        = os.path.join(ROOT, "data",   "player_count_log.csv")
 SETTINGS_FILE   = os.path.join(ROOT, "config", "settings.json")
 SUBSCRIBERS_FILE = os.path.join(ROOT, "config", "subscribers.csv")
-TEMPLATE_FILE   = os.path.join(ROOT, "tools",  "email_alert_template.html")
+TEMPLATE_FILE   = os.path.join(ROOT, "html",  "email_alert_template.html")
 
 LOG_URL     = "https://github.com/gregorioguirado/Knighfall-Revival/blob/main/data/player_count_log.csv"
 DISCORD_URL = "https://discord.gg/Jt58UeZf"
