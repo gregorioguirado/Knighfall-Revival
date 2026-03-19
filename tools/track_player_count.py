@@ -139,20 +139,36 @@ def highest_milestone_reached(rows):
 def _render_template(count, milestone, trend_label, trend_color):
     progress = min(100, round(count / GOAL * 100))
     date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
+
+    if count >= 30:
+        accent_color = "#c9a227"
+        mood_label   = "Alert"
+        hero_title   = "There are enough players<br>online for a full lobby."
+        cta_text     = "Jump on Discord"
+    else:
+        accent_color = "#586069"
+        mood_label   = "Low Population"
+        hero_title   = "Too quiet right now.<br>Help spread the word."
+        cta_text     = "Join the Discord"
+
     try:
         with open(TEMPLATE_FILE, encoding="utf-8") as f:
             html = f.read()
     except FileNotFoundError:
         return None
     for token, value in {
-        "{{COUNT}}":       str(count),
-        "{{MILESTONE}}":   str(milestone or count),
-        "{{PROGRESS}}":    str(progress),
-        "{{TREND_LABEL}}": trend_label,
-        "{{TREND_COLOR}}": trend_color,
-        "{{LOG_URL}}":     LOG_URL,
-        "{{DISCORD_URL}}": DISCORD_URL,
-        "{{DATE}}":        date_str,
+        "{{COUNT}}":        str(count),
+        "{{MILESTONE}}":    str(milestone or count),
+        "{{PROGRESS}}":     str(progress),
+        "{{TREND_LABEL}}":  trend_label,
+        "{{TREND_COLOR}}":  trend_color,
+        "{{LOG_URL}}":      LOG_URL,
+        "{{DISCORD_URL}}":  DISCORD_URL,
+        "{{DATE}}":         date_str,
+        "{{ACCENT_COLOR}}": accent_color,
+        "{{MOOD_LABEL}}":   mood_label,
+        "{{HERO_TITLE}}":   hero_title,
+        "{{CTA_TEXT}}":     cta_text,
     }.items():
         html = html.replace(token, value)
     return html
@@ -169,9 +185,12 @@ def send_alerts(count, milestone=None, rows=None):
         print("ALERT: No active subscribers — skipping emails.")
         return
 
-    subject = f"Knightfall alert: {count} players online!"
     if milestone == GOAL:
-        subject = f"GOAL REACHED — Knightfall hit {count} players!"
+        subject = f"GOAL REACHED - Knightfall hit {count} players!"
+    elif count >= 30:
+        subject = f"Knightfall: {count} players online - lobby is filling!"
+    else:
+        subject = f"Knightfall: only {count} players online - help spread the word"
 
     # Trend from last 3 data points
     trend_label, trend_color = "FLAT", "#c9a227"
@@ -192,22 +211,24 @@ def send_alerts(count, milestone=None, rows=None):
         f"Discord:  {DISCORD_URL}\n"
     )
 
+    recipient_emails = [sub["email"].strip() for sub in subscribers]
+    recipient_names  = [sub.get("name", sub["email"].strip()) for sub in subscribers]
+
+    if html_body:
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(plain_body, "plain", "utf-8"))
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+    else:
+        msg = MIMEText(plain_body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"]    = GMAIL_USER
+    msg["To"]      = ", ".join(recipient_emails)
+
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-            for sub in subscribers:
-                email = sub["email"].strip()
-                if html_body:
-                    msg = MIMEMultipart("alternative")
-                    msg.attach(MIMEText(plain_body, "plain", "utf-8"))
-                    msg.attach(MIMEText(html_body, "html", "utf-8"))
-                else:
-                    msg = MIMEText(plain_body, "plain", "utf-8")
-                msg["Subject"] = subject
-                msg["From"] = GMAIL_USER
-                msg["To"] = email
-                server.sendmail(GMAIL_USER, email, msg.as_bytes())
-                print(f"  Alert sent -> {email} ({sub.get('name', '')})")
+            server.sendmail(GMAIL_USER, recipient_emails, msg.as_bytes())
+            print(f"  Alert sent -> {', '.join(recipient_names)}")
     except Exception as e:
         print(f"ERROR sending alert emails: {e}")
 

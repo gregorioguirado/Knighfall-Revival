@@ -12,6 +12,10 @@
     {{LOG_URL}}      GitHub CSV log URL
     {{DISCORD_URL}}  Discord invite link
     {{DATE}}         e.g. March 19, 2026
+    {{ACCENT_COLOR}} gold (#c9a227) when happy, grey (#586069) when sad
+    {{MOOD_LABEL}}   "Alert" or "Low Population"
+    {{HERO_TITLE}}   main headline — changes based on player count
+    {{CTA_TEXT}}     call-to-action button label
 -->
 <head>
   <meta charset="UTF-8" />
@@ -27,23 +31,23 @@
 
           <!-- Top accent bar -->
           <tr>
-            <td style="height:4px;background:#c9a227;font-size:0;line-height:0;">&nbsp;</td>
+            <td style="height:4px;background:{{ACCENT_COLOR}};font-size:0;line-height:0;">&nbsp;</td>
           </tr>
 
           <!-- ALERT HERO -->
           <tr>
             <td style="padding:36px 32px 28px 32px;text-align:center;">
-              <p style="margin:0 0 14px 0;font-size:32px;line-height:1;">⚔️</p>
-              <h1 style="margin:0 0 10px 0;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.18em;color:#c9a227;">Alert</h1>
-              <p style="margin:0 0 8px 0;font-size:26px;font-weight:800;color:#e6edf3;line-height:1.25;">There are enough players<br>online for a full lobby.</p>
-              <p style="margin:0;font-size:15px;color:#8b949e;">{{COUNT}} players on right now &nbsp;·&nbsp; {{DATE}}</p>
+              <p style="margin:0 0 14px 0;font-size:32px;line-height:1;">&#9876;&#65039;</p>
+              <h1 style="margin:0 0 10px 0;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.18em;color:{{ACCENT_COLOR}};">{{MOOD_LABEL}}</h1>
+              <p style="margin:0 0 8px 0;font-size:26px;font-weight:800;color:#e6edf3;line-height:1.25;">{{HERO_TITLE}}</p>
+              <p style="margin:0;font-size:15px;color:#8b949e;">{{COUNT}} players on right now &nbsp;&middot;&nbsp; {{DATE}}</p>
             </td>
           </tr>
 
           <!-- CTA -->
           <tr>
             <td style="padding:0 32px 32px 32px;text-align:center;">
-              <a href="{{DISCORD_URL}}" style="display:inline-block;padding:14px 32px;background-color:#c9a227;color:#0d1117;text-decoration:none;border-radius:8px;font-size:15px;font-weight:800;letter-spacing:0.04em;">Jump on Discord →</a>
+              <a href="{{DISCORD_URL}}" style="display:inline-block;padding:14px 32px;background-color:{{ACCENT_COLOR}};color:#0d1117;text-decoration:none;border-radius:8px;font-size:15px;font-weight:800;letter-spacing:0.04em;">{{CTA_TEXT}}</a>
             </td>
           </tr>
 
