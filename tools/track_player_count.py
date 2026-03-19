@@ -199,15 +199,15 @@ def send_alerts(count, milestone=None, rows=None):
                 email = sub["email"].strip()
                 if html_body:
                     msg = MIMEMultipart("alternative")
-                    msg.attach(MIMEText(plain_body, "plain"))
-                    msg.attach(MIMEText(html_body, "html"))
+                    msg.attach(MIMEText(plain_body, "plain", "utf-8"))
+                    msg.attach(MIMEText(html_body, "html", "utf-8"))
                 else:
-                    msg = MIMEText(plain_body)
+                    msg = MIMEText(plain_body, "plain", "utf-8")
                 msg["Subject"] = subject
                 msg["From"] = GMAIL_USER
                 msg["To"] = email
-                server.send_message(msg)
-                print(f"  Alert sent → {email} ({sub.get('name', '')})")
+                server.sendmail(GMAIL_USER, email, msg.as_bytes())
+                print(f"  Alert sent -> {email} ({sub.get('name', '')})")
     except Exception as e:
         print(f"ERROR sending alert emails: {e}")
 
@@ -268,6 +268,12 @@ def print_summary():
 def main():
     if "--summary" in sys.argv:
         print_summary()
+        return
+
+    if "--test-email" in sys.argv:
+        print("Sending test email to all active subscribers...")
+        count = fetch_player_count() or 11
+        send_alerts(count, milestone=None, rows=[])
         return
 
     count = fetch_player_count()
